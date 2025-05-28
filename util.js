@@ -815,24 +815,92 @@ function calculateDefaultStartPitch(startPitch, lowPitch, highPitch) {
   return new exsurge.Pitch(startPitch + ((4 * 12 + 7) - Math.floor((lowPitch + highPitch) / 2)));
 }
 var Tone;
+var toneLoaded = false;
+var toneLoadPromise = null;
+
+function loadToneJS() {
+  if (toneLoaded) {
+    return Promise.resolve();
+  }
+  
+  if (toneLoadPromise) {
+    return toneLoadPromise;
+  }
+  
+  toneLoadPromise = new Promise(function(resolve, reject) {
+    var script = document.createElement('script');
+    script.src = 'js/Tone.min.js';
+    script.onload = function() {
+      toneLoaded = true;
+      Tone = window.Tone;
+      resolve();
+    };
+    script.onerror = function() {
+      reject(new Error('Failed to load Tone.js'));
+    };
+    document.head.appendChild(script);
+  });
+  
+  return toneLoadPromise;
+}
+
 if(typeof window=='object') (function(window) {
   var synth;
-  if(Tone) {
-    synth = new Tone.Synth({
-      "oscillator" : {
-          type: "custom",
-          partials: [0.3,0.03,0.05]
-        },
-        "envelope" : {
-          "attack" : 0.05,
-          "decay" : 0.3,
-          "sustain" : 0.4,
-          "release" : 0.8,
+  var toneInitialized = false;
+  
+  function initializeTone() {
+    return loadToneJS().then(function() {
+      if (!toneInitialized && Tone) {
+        // Start Tone.js context to comply with autoplay policy
+        if (Tone.context.state === 'suspended') {
+          return Tone.start().then(function() {
+            synth = new Tone.Synth({
+              "oscillator" : {
+                  type: "custom",
+                  partials: [0.3,0.03,0.05]
+                },
+                "envelope" : {
+                  "attack" : 0.05,
+                  "decay" : 0.3,
+                  "sustain" : 0.4,
+                  "release" : 0.8,
+                }
+            }).toMaster();
+            Tone.Transport.bpm.value = 165;
+            toneInitialized = true;
+          });
+        } else {
+          synth = new Tone.Synth({
+            "oscillator" : {
+                type: "custom",
+                partials: [0.3,0.03,0.05]
+              },
+              "envelope" : {
+                "attack" : 0.05,
+                "decay" : 0.3,
+                "sustain" : 0.4,
+                "release" : 0.8,
+              }
+          }).toMaster();
+          Tone.Transport.bpm.value = 165;
+          toneInitialized = true;
+          return Promise.resolve();
         }
-    }).toMaster();
-    Tone.Transport.bpm.value = 165;
-    window.setTempo = function(newTempo) { Tone.Transport.bpm.value = newTempo || 165; }
-    window.setRelativeTempo = function(delta) {
+      }
+      return Promise.resolve();
+    });
+  }
+  
+  // Make initializeTone globally accessible
+  window.initializeTone = initializeTone;
+  
+  window.setTempo = function(newTempo) { 
+    return initializeTone().then(function() {
+      Tone.Transport.bpm.value = newTempo || 165; 
+    });
+  }
+  window.setRelativeTempo = function(delta) {
+    return initializeTone().then(function() {
       var state = Tone.Transport.state;
       Tone.Transport.stop();
       var val = Tone.Transport.bpm.value = Math.round(Math.max(0, Tone.Transport.bpm.value + delta)) || 165;
@@ -842,17 +910,19 @@ if(typeof window=='object') (function(window) {
         timeoutNextNote = Tone.Transport.scheduleOnce(playNextNote, '+8n');
       }
       return val;
-    }
-    window.setIsUsingSolesmesLengths = function(val) {
-      localStorage.isUsingSolesmesLengths = val;
-    }
-    window.getIsUsingSolesmesLengths = function() {
-      return (localStorage.isUsingSolesmesLengths !== 'false');
-    }
-    window.toggleIsUsingSolesmesLengths = function() {
-      return (localStorage.isUsingSolesmesLengths = !getIsUsingSolesmesLengths());
-    }
-    window.playScore = function(score, firstPitch, startNote){
+    });
+  }
+  window.setIsUsingSolesmesLengths = function(val) {
+    localStorage.isUsingSolesmesLengths = val;
+  }
+  window.getIsUsingSolesmesLengths = function() {
+    return (localStorage.isUsingSolesmesLengths !== 'false');
+  }
+  window.toggleIsUsingSolesmesLengths = function() {
+    return (localStorage.isUsingSolesmesLengths = !getIsUsingSolesmesLengths());
+  }
+  window.playScore = function(score, firstPitch, startNote){
+    return initializeTone().then(function() {
       Tone.Transport.clear(timeoutNextNote);
       Tone.Transport.start();
       if($('#mediaControls').length == 0) {
@@ -1068,8 +1138,12 @@ if(typeof window=='object') (function(window) {
               totalDuration += getNoteDuration(notes, noteId+1);
             }
 
-            if(totalDuration > 0) synth.triggerAttackRelease(noteName, new Tone.Time("4n").toSeconds()*totalDuration, time);
+            if(totalDuration > 0) {
+              initializeTone();
+              synth.triggerAttackRelease(noteName, new Tone.Time("4n").toSeconds()*totalDuration, time);
+            }
           } else {
+            initializeTone();
             synth.triggerAttackRelease(noteName, new Tone.Time("4n").toSeconds()*duration, time);
           }
         }
@@ -1086,6 +1160,7 @@ if(typeof window=='object') (function(window) {
           Tone.Transport.pause();
           timeoutNextNote = null;
         } else {
+          initializeTone();
           Tone.Transport.start();
           playNextNote();
           return true;
@@ -1099,16 +1174,16 @@ if(typeof window=='object') (function(window) {
           syllable.classList.add('active');
         }
       }
-    };
-    window.stopScore = function(){
+    });
+  };
+  window.stopScore = function(){
+    if (Tone && Tone.Transport) {
       Tone.Transport.stop();
-      _isPlaying=false;
-      $('#mediaControls').addClass('offscreen');
     }
-  } else {
-    Tone = {};
-    window.setTempo = window.setRelativeTempo = window.playScore = window.stopScore = function(){};
-  }
+    _isPlaying=false;
+    $('#mediaControls').addClass('offscreen');
+  };
+  
   var timeoutNextNote, transpose = 0;
   var _isPlaying=false;
   var noteElem, syllable;
@@ -1651,6 +1726,7 @@ if(typeof $=='function') $(function($) {
     $(this).find('.glyphicon').removeClass('glyphicon-play glyphicon-pause').addClass('glyphicon-' + (playing? 'pause' : 'play'));
   }).on('click', '#mediaControls .btn.step-forward', function(e) {
     e.stopPropagation();
+    initializeTone();
     Tone.Transport.pause();
     playNextNote();
     $('#mediaControls .btn.play-pause .glyphicon').removeClass('glyphicon-play glyphicon-pause').addClass('glyphicon-play');

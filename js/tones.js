@@ -2,14 +2,27 @@
 (function(window) {
 
     var tones = {
-        context: new (window.AudioContext || window.webkitAudioContext)(),
+        context: null,
         attack: 100,
         release: 300,
         volume: 0.33,
         type: "custom",
 
+        // Initialize AudioContext on first use
+        _initContext: function() {
+            if (!this.context) {
+                this.context = new (window.AudioContext || window.webkitAudioContext)();
+                // need to create a node in order to kick off the timer in Chrome.
+                this.context.createGain();
+                this._wave = this.context.createPeriodicWave(new Float32Array([0,.3,.03,.05]), new Float32Array([0,0,0,0]));
+            }
+            return this.context;
+        },
 
         playFrequency: function(freq, options) {
+            // Initialize context on first use
+            this._initContext();
+            
             options = options || {};
             var attack = options.attack || this.attack || 1;
             var release = options.release || this.release || 1;
@@ -35,7 +48,7 @@
             if(this.type != 'custom') {
                 osc.type = this.type;
             } else {
-                osc.setPeriodicWave(wave);
+                osc.setPeriodicWave(this._wave);
             }
             osc.connect(envelope);
             osc.start(0);
@@ -114,6 +127,7 @@
         ],
 
         getTimeMS: function() {
+            this._initContext();
             return this.context.currentTime * 1000;
         },
 
@@ -140,12 +154,6 @@
     }
 
     tones.map = tones.makeToneMap(440, 9, 4);
-
-    // need to create a node in order to kick off the timer in Chrome.
-    tones.context.createGain();
-
-    var wave = tones.context.createPeriodicWave(new Float32Array([0,.3,.03,.05]), new Float32Array([0,0,0,0]));
-
 
     if (typeof define === "function" && define.amd) {
         define(tones);
